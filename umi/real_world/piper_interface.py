@@ -125,9 +125,11 @@ class PiperInterface:
         RY = int(round(euler_deg[1] * 1000.0))
         RZ = int(round(euler_deg[2] * 1000.0))
         
-        # Set motion mode to MOVEL (linear motion) for cartesian control
-        # Mode: 0x01=CAN control, 0x02=MOVEL, speed=100, is_mit=0x00
-        self.piper.MotionCtrl_2(0x01, 0x02, 100, 0x00)
+        # Set motion mode to MOVEP (point-to-point) for cartesian control
+        # Mode: 0x01=CAN control, 0x00=MOVEP, speed=100, is_mit=0x00
+        # Note: Matching demo script which uses MOVEP (0x00) instead of MOVEL (0x02)
+        # MOVEP is sent every iteration to ensure mode is maintained
+        self.piper.MotionCtrl_2(0x01, 0x00, 100, 0x00)
         
         # Send pose command
         self.piper.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
@@ -201,11 +203,13 @@ class PiperInterface:
             # Fallback: clamp to hardware limits (0-150mm)
             gripper_angle_um = max(0, min(gripper_angle_um, 150000))  # 150mm max
         
-        # Send gripper command (always enable gripper with 0x01 to ensure it stays enabled)
+        # Send gripper command
+        # Use 0x03 (enable and clear errors) instead of 0x01 to handle error conditions
+        # This matches the demo behavior of sending enable commands every iteration
         self.piper.GripperCtrl(
             gripper_angle=gripper_angle_um,
             gripper_effort=int(effort),  # 0.001 N/m
-            gripper_code=0x01,  # Enable
+            gripper_code=0x03,  # Enable and clear errors (more robust than 0x01)
             set_zero=0x00  # Don't set zero
         )
     

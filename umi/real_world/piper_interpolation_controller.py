@@ -249,6 +249,12 @@ class PiperInterpolationController(mp.Process):
             if self.verbose:
                 print(f"[PiperPositionalController] Connect to robot: {self.can_name}")
             
+            # Initialize motion mode to MOVEP (point-to-point) for cartesian control
+            # Mode: 0x01=CAN control, 0x00=MOVEP, speed=100, is_mit=0x00
+            # This matches the demo script and ensures the robot is in the correct mode
+            robot.piper.MotionCtrl_2(0x01, 0x00, 100, 0x00)
+            time.sleep(0.1)  # Give the robot time to set the mode
+            
             # init pose (if needed)
             # Note: Piper doesn't have a direct move_to_joint_positions like Franka
             # Joint initialization would need to be done via JointCtrl if needed
@@ -346,7 +352,38 @@ class PiperInterpolationController(mp.Process):
                 # send gripper command
                 gripper_command = gripper_interp(t_now)
                 gripper_pos = gripper_command[0]  # Extract position from pose array
+                
+                # Check gripper driver status periodically (every 50 iterations = ~0.5s at 100Hz)
+                # and re-enable if needed
+                if iter_idx % 50 == 0:
+                    gripper_state_check = robot.get_gripper_state()
+                    if not gripper_state_check.get('driver_enabled', False):
+                        if self.verbose:
+                            print(f"[PiperPositionalController] WARNING: Gripper driver disabled! Status: 0x{gripper_state_check['gripper_state']:02x}, re-enabling...")
+                        # Clear errors and re-enable (matching initialization sequence)
+                        robot.piper.GripperCtrl(0, 1000, 0x02, 0)  # Disable and clear errors
+                        time.sleep(0.005)
+                        # Send enable commands continuously for a short period (like initialization)
+                        for _ in range(10):  # 10 iterations at 100Hz = 0.1s
+                            robot.piper.GripperCtrl(0, 1000, 0x01, 0)  # Enable
+                            time.sleep(0.01)
+                        # Verify it's enabled
+                        gripper_state_check = robot.get_gripper_state()
+                        if gripper_state_check.get('driver_enabled', False):
+                            if self.verbose:
+                                print(f"[PiperPositionalController] Gripper driver re-enabled successfully")
+                        else:
+                            if self.verbose:
+                                print(f"[PiperPositionalController] ERROR: Failed to re-enable gripper driver! Status: 0x{gripper_state_check['gripper_state']:02x}")
+                
                 robot.update_desired_gripper_position(gripper_pos)
+                
+                # Debug: Log gripper command occasionally (every 100 iterations = ~1 second at 100Hz)
+                if self.verbose and iter_idx % 100 == 0:
+                    gripper_state_debug = robot.get_gripper_state()
+                    print(f"[PiperPositionalController] Gripper cmd: {gripper_pos*1000:.2f} mm, "
+                          f"actual: {gripper_state_debug['gripper_position']*1000:.2f} mm, "
+                          f"enabled: {gripper_state_debug.get('driver_enabled', False)}")
 
                 # update robot state
                 state = dict()
@@ -432,8 +469,9 @@ class PiperInterpolationController(mp.Process):
                         break
 
                 # fetch gripper commands from queue
+                # Process all available commands to avoid missing waypoints
                 try:
-                    gripper_commands = self.gripper_input_queue.get_k(1)
+                    gripper_commands = self.gripper_input_queue.get_all()
                     n_gripper_cmd = len(gripper_commands['cmd'])
                 except Empty:
                     n_gripper_cmd = 0
@@ -454,6 +492,14 @@ class PiperInterpolationController(mp.Process):
                         # translate global time to monotonic time
                         target_time = time.monotonic() - time.time() + target_time
                         curr_time = t_now + dt
+                        
+                        # Ensure target_time is in the future to avoid schedule_waypoint rejecting it
+                        # If target_time is in the past, adjust it slightly forward
+                        if target_time <= curr_time:
+                            if self.verbose:
+                                print(f"[PiperPositionalController] WARNING: Gripper target_time {target_time:.3f} <= curr_time {curr_time:.3f}, adjusting forward")
+                            target_time = curr_time + 0.01  # Add 10ms buffer
+                        
                         # Use schedule_waypoint with only position (gripper is 1D)
                         gripper_pose = np.array([target_gripper_pos, 0, 0, 0, 0, 0])
                         gripper_interp = gripper_interp.schedule_waypoint(
@@ -465,6 +511,9 @@ class PiperInterpolationController(mp.Process):
                             last_waypoint_time=last_gripper_waypoint_time
                         )
                         last_gripper_waypoint_time = target_time
+                        
+                        if self.verbose:
+                            print(f"[PiperPositionalController] Scheduled gripper waypoint: {target_gripper_pos*1000:.2f} mm at t={target_time:.3f}")
 
                 # regulate frequency
                 t_wait_util = t_start + (iter_idx + 1) * dt
