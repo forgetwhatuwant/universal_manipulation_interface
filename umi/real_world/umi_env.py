@@ -264,24 +264,27 @@ class UmiEnv:
             robot = PiperInterpolationController(
                 shm_manager=shm_manager,
                 can_name=robot_ip,  # CAN interface name (e.g., "can0")
-                frequency=50,  # Lower frequency for CAN bus
+                frequency=100,  # Control frequency in Hz (100 Hz recommended, up to 200 Hz supported)
                 max_pos_speed=max_pos_speed,
                 max_rot_speed=max_rot_speed,
                 verbose=False,
                 receive_latency=robot_obs_latency
             )
-        
-        gripper = WSGController(
-            shm_manager=shm_manager,
-            hostname=gripper_ip,
-            port=gripper_port,
-            receive_latency=gripper_obs_latency,
-            use_meters=True
-        )
+            # Piper has integrated gripper, no separate WSGController needed
+            gripper = None
+        else:
+            gripper = WSGController(
+                shm_manager=shm_manager,
+                hostname=gripper_ip,
+                port=gripper_port,
+                receive_latency=gripper_obs_latency,
+                use_meters=True
+            )
 
         self.camera = camera
         self.robot = robot
         self.gripper = gripper
+        self.robot_type = robot_type
         self.multi_cam_vis = multi_cam_vis
         self.frequency = frequency
         self.max_obs_buffer_size = max_obs_buffer_size
@@ -316,11 +319,13 @@ class UmiEnv:
     # ======== start-stop API =============
     @property
     def is_ready(self):
-        return self.camera.is_ready and self.robot.is_ready and self.gripper.is_ready
+        gripper_ready = True if self.gripper is None else self.gripper.is_ready
+        return self.camera.is_ready and self.robot.is_ready and gripper_ready
     
     def start(self, wait=True):
         self.camera.start(wait=False)
-        self.gripper.start(wait=False)
+        if self.gripper is not None:
+            self.gripper.start(wait=False)
         self.robot.start(wait=False)
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start(wait=False)
@@ -332,21 +337,24 @@ class UmiEnv:
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.stop(wait=False)
         self.robot.stop(wait=False)
-        self.gripper.stop(wait=False)
+        if self.gripper is not None:
+            self.gripper.stop(wait=False)
         self.camera.stop(wait=False)
         if wait:
             self.stop_wait()
 
     def start_wait(self):
         self.camera.start_wait()
-        self.gripper.start_wait()
+        if self.gripper is not None:
+            self.gripper.start_wait()
         self.robot.start_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start_wait()
     
     def stop_wait(self):
         self.robot.stop_wait()
-        self.gripper.stop_wait()
+        if self.gripper is not None:
+            self.gripper.stop_wait()
         self.camera.stop_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.stop_wait()
@@ -385,7 +393,12 @@ class UmiEnv:
         # both have more than n_obs_steps data
 
         # 30 hz, gripper_receive_timestamp
-        last_gripper_data = self.gripper.get_all_state()
+        if self.robot_type.startswith('piper'):
+            # Piper has integrated gripper
+            last_gripper_data = self.robot.get_all_gripper_state()
+        else:
+            # Separate WSG gripper
+            last_gripper_data = self.gripper.get_all_state()
 
         last_timestamp = self.last_camera_data[self.align_camera_idx]['timestamp'][-1]
         dt = 1 / self.frequency
@@ -482,10 +495,18 @@ class UmiEnv:
                 pose=r_actions,
                 target_time=new_timestamps[i]-r_latency
             )
-            self.gripper.schedule_waypoint(
-                pos=g_actions,
-                target_time=new_timestamps[i]-g_latency
-            )
+            if self.robot_type.startswith('piper'):
+                # Piper has integrated gripper
+                self.robot.schedule_gripper_waypoint(
+                    pos=g_actions[0] if len(g_actions) > 0 else 0.0,
+                    target_time=new_timestamps[i]-g_latency
+                )
+            else:
+                # Separate WSG gripper
+                self.gripper.schedule_waypoint(
+                    pos=g_actions,
+                    target_time=new_timestamps[i]-g_latency
+                )
 
         # record actions
         if self.action_accumulator is not None:

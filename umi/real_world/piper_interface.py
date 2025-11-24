@@ -84,16 +84,24 @@ class PiperInterface:
     
     def get_joint_velocities(self):
         """
-        Get joint velocities. 
-        Note: Piper SDK may not provide direct velocity feedback.
-        This would need to be computed from position differences.
+        Get joint velocities from Piper SDK high-speed feedback.
         
         Returns:
             np.array([v0, v1, v2, v3, v4, v5]) in rad/s
         """
-        # Piper SDK doesn't seem to provide direct velocity feedback
-        # Return zeros for now, could be computed from position differences
-        return np.zeros(6)
+        motor_info = self.piper.GetArmHighSpdInfoMsgs()
+        
+        # Extract motor speeds: units are 0.001 rad/s, convert to rad/s
+        velocities = np.array([
+            motor_info.motor_1.motor_speed / 1000.0,  # 0.001 rad/s → rad/s
+            motor_info.motor_2.motor_speed / 1000.0,
+            motor_info.motor_3.motor_speed / 1000.0,
+            motor_info.motor_4.motor_speed / 1000.0,
+            motor_info.motor_5.motor_speed / 1000.0,
+            motor_info.motor_6.motor_speed / 1000.0
+        ])
+        
+        return velocities
     
     def update_desired_ee_pose(self, pose: np.ndarray):
         """
@@ -123,6 +131,83 @@ class PiperInterface:
         
         # Send pose command
         self.piper.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
+    
+    def get_gripper_position(self):
+        """
+        Get gripper position in UMI format.
+        
+        Returns:
+            float: Gripper opening width in meters
+        """
+        gripper_msg = self.piper.GetArmGripperMsgs()
+        # Convert from 0.001 mm to meters
+        gripper_angle_um = gripper_msg.gripper_state.grippers_angle  # 0.001 mm
+        gripper_position_m = gripper_angle_um / 1e6  # meters
+        return gripper_position_m
+    
+    def get_gripper_state(self):
+        """
+        Get full gripper state in UMI format.
+        
+        Returns:
+            dict: Gripper state with keys matching WSGController format
+        """
+        import time
+        gripper_msg = self.piper.GetArmGripperMsgs()
+        
+        # Convert from 0.001 mm to meters
+        gripper_angle_um = gripper_msg.gripper_state.grippers_angle  # 0.001 mm
+        gripper_position_m = gripper_angle_um / 1e6  # meters
+        
+        # Convert effort from 0.001 N·m to N·m
+        gripper_effort_nm = gripper_msg.gripper_state.grippers_effort / 1000.0
+        
+        # Extract status flags and parse FOC status
+        status_code = gripper_msg.gripper_state.status_code
+        foc_status = gripper_msg.gripper_state.foc_status
+        
+        return {
+            'gripper_state': status_code,
+            'gripper_position': gripper_position_m,  # meters
+            'gripper_velocity': 0.0,  # Not directly available, could compute from differences
+            'gripper_force': gripper_effort_nm,  # N·m
+            'gripper_measure_timestamp': gripper_msg.time_stamp,
+            'gripper_receive_timestamp': time.time(),
+            'gripper_timestamp': time.time() - 0.01,  # Approximate latency
+            # Additional status info for debugging
+            'driver_enabled': foc_status.driver_enable_status,
+            'homing_status': foc_status.homing_status,
+        }
+    
+    def update_desired_gripper_position(self, position: float, effort: float = 1000.0):
+        """
+        Send desired gripper position command.
+        
+        Args:
+            position: Gripper opening width in meters (UMI uses 0 to 0.09m = 90mm typically)
+            effort: Gripper effort in 0.001 N/m (default 1000 = 1 N/m)
+        """
+        # Convert meters → 0.001 mm
+        gripper_angle_um = int(round(position * 1e6))
+        
+        # Get SDK gripper range limits if available, otherwise use hardware max (150mm)
+        try:
+            g_min, g_max = self.piper.GetSDKGripperRangeParam()
+            g_min_um = int(round(g_min * 1e6))  # Convert meters to 0.001 mm
+            g_max_um = int(round(g_max * 1e6))
+            # Clamp to SDK limits
+            gripper_angle_um = max(g_min_um, min(gripper_angle_um, g_max_um))
+        except:
+            # Fallback: clamp to hardware limits (0-150mm)
+            gripper_angle_um = max(0, min(gripper_angle_um, 150000))  # 150mm max
+        
+        # Send gripper command (always enable gripper with 0x01 to ensure it stays enabled)
+        self.piper.GripperCtrl(
+            gripper_angle=gripper_angle_um,
+            gripper_effort=int(effort),  # 0.001 N/m
+            gripper_code=0x01,  # Enable
+            set_zero=0x00  # Don't set zero
+        )
     
     def close(self):
         """Close the Piper interface."""
