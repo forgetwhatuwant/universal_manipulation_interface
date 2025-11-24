@@ -8,6 +8,7 @@ from multiprocessing.managers import SharedMemoryManager
 from umi.real_world.rtde_interpolation_controller import RTDEInterpolationController
 from umi.real_world.wsg_controller import WSGController
 from umi.real_world.franka_interpolation_controller import FrankaInterpolationController
+from umi.real_world.piper_interpolation_controller import PiperInterpolationController
 from umi.real_world.multi_uvc_camera import MultiUvcCamera, VideoRecorder
 from diffusion_policy.common.timestamp_accumulator import (
     TimestampActionAccumulator,
@@ -237,6 +238,17 @@ class BimanualUmiEnv:
                     frequency=200,
                     Kx_scale=1.0,
                     Kxd_scale=np.array([2.0,1.5,2.0,1.0,1.0,1.0]),
+                    verbose=False,
+                    receive_latency=rc['robot_obs_latency']
+                )
+            elif rc['robot_type'].startswith('piper'):
+                # For Piper, robot_ip parameter is actually the CAN interface name
+                this_robot = PiperInterpolationController(
+                    shm_manager=shm_manager,
+                    can_name=rc['robot_ip'],  # CAN interface name (e.g., "can0")
+                    frequency=50,  # Lower frequency for CAN bus
+                    max_pos_speed=max_pos_speed*cube_diag,
+                    max_rot_speed=max_rot_speed*cube_diag,
                     verbose=False,
                     receive_latency=rc['robot_obs_latency']
                 )
