@@ -273,13 +273,13 @@ class UmiEnv:
             # Piper has integrated gripper, no separate WSGController needed
             gripper = None
         else:
-            gripper = WSGController(
-                shm_manager=shm_manager,
-                hostname=gripper_ip,
-                port=gripper_port,
-                receive_latency=gripper_obs_latency,
-                use_meters=True
-            )
+        gripper = WSGController(
+            shm_manager=shm_manager,
+            hostname=gripper_ip,
+            port=gripper_port,
+            receive_latency=gripper_obs_latency,
+            use_meters=True
+        )
 
         self.camera = camera
         self.robot = robot
@@ -325,7 +325,7 @@ class UmiEnv:
     def start(self, wait=True):
         self.camera.start(wait=False)
         if self.gripper is not None:
-            self.gripper.start(wait=False)
+        self.gripper.start(wait=False)
         self.robot.start(wait=False)
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start(wait=False)
@@ -338,7 +338,7 @@ class UmiEnv:
             self.multi_cam_vis.stop(wait=False)
         self.robot.stop(wait=False)
         if self.gripper is not None:
-            self.gripper.stop(wait=False)
+        self.gripper.stop(wait=False)
         self.camera.stop(wait=False)
         if wait:
             self.stop_wait()
@@ -346,7 +346,7 @@ class UmiEnv:
     def start_wait(self):
         self.camera.start_wait()
         if self.gripper is not None:
-            self.gripper.start_wait()
+        self.gripper.start_wait()
         self.robot.start_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start_wait()
@@ -354,7 +354,7 @@ class UmiEnv:
     def stop_wait(self):
         self.robot.stop_wait()
         if self.gripper is not None:
-            self.gripper.stop_wait()
+        self.gripper.stop_wait()
         self.camera.stop_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.stop_wait()
@@ -398,7 +398,7 @@ class UmiEnv:
             last_gripper_data = self.robot.get_all_gripper_state()
         else:
             # Separate WSG gripper
-            last_gripper_data = self.gripper.get_all_state()
+        last_gripper_data = self.gripper.get_all_state()
 
         last_timestamp = self.last_camera_data[self.align_camera_idx]['timestamp'][-1]
         dt = 1 / self.frequency
@@ -503,10 +503,10 @@ class UmiEnv:
                 )
             else:
                 # Separate WSG gripper
-                self.gripper.schedule_waypoint(
-                    pos=g_actions,
-                    target_time=new_timestamps[i]-g_latency
-                )
+            self.gripper.schedule_waypoint(
+                pos=g_actions,
+                target_time=new_timestamps[i]-g_latency
+            )
 
         # record actions
         if self.action_accumulator is not None:

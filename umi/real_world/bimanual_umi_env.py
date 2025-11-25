@@ -262,14 +262,14 @@ class BimanualUmiEnv:
                 # Piper has integrated gripper, no separate WSGController needed
                 grippers.append(None)
             else:
-                this_gripper = WSGController(
-                    shm_manager=shm_manager,
-                    hostname=gc['gripper_ip'],
-                    port=gc['gripper_port'],
-                    receive_latency=gc['gripper_obs_latency'],
-                    use_meters=True
-                )
-                grippers.append(this_gripper)
+            this_gripper = WSGController(
+                shm_manager=shm_manager,
+                hostname=gc['gripper_ip'],
+                port=gc['gripper_port'],
+                receive_latency=gc['gripper_obs_latency'],
+                use_meters=True
+            )
+            grippers.append(this_gripper)
 
         self.camera = camera
         
@@ -312,7 +312,7 @@ class BimanualUmiEnv:
             ready_flag = ready_flag and robot.is_ready
         for gripper in self.grippers:
             if gripper is not None:
-                ready_flag = ready_flag and gripper.is_ready
+            ready_flag = ready_flag and gripper.is_ready
         return ready_flag
     
     def start(self, wait=True):
@@ -321,7 +321,7 @@ class BimanualUmiEnv:
             robot.start(wait=False)
         for gripper in self.grippers:
             if gripper is not None:
-                gripper.start(wait=False)
+            gripper.start(wait=False)
 
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start(wait=False)
@@ -336,7 +336,7 @@ class BimanualUmiEnv:
             robot.stop(wait=False)
         for gripper in self.grippers:
             if gripper is not None:
-                gripper.stop(wait=False)
+            gripper.stop(wait=False)
         self.camera.stop(wait=False)
         if wait:
             self.stop_wait()
@@ -347,7 +347,7 @@ class BimanualUmiEnv:
             robot.start_wait()
         for gripper in self.grippers:
             if gripper is not None:
-                gripper.start_wait()
+            gripper.start_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start_wait()
     
@@ -356,7 +356,7 @@ class BimanualUmiEnv:
             robot.stop_wait()
         for gripper in self.grippers:
             if gripper is not None:
-                gripper.stop_wait()
+            gripper.stop_wait()
         self.camera.stop_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.stop_wait()
@@ -401,7 +401,7 @@ class BimanualUmiEnv:
         for robot_idx, (robot, gripper) in enumerate(zip(self.robots, self.grippers)):
             if gripper is not None:
                 # Separate WSG gripper
-                last_grippers_data.append(gripper.get_all_state())
+            last_grippers_data.append(gripper.get_all_state())
             else:
                 # Piper integrated gripper
                 last_grippers_data.append(robot.get_all_gripper_state())
@@ -536,10 +536,10 @@ class BimanualUmiEnv:
                 )
                 if gripper is not None:
                     # Separate WSG gripper
-                    gripper.schedule_waypoint(
-                        pos=g_actions,
-                        target_time=new_timestamps[i] - g_latency
-                    )
+                gripper.schedule_waypoint(
+                    pos=g_actions,
+                    target_time=new_timestamps[i] - g_latency
+                )
                 else:
                     # Piper integrated gripper
                     robot.schedule_gripper_waypoint(
