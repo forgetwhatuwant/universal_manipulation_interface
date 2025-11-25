@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.spatial.transform as st
 from piper_sdk import C_PiperInterface_V2
+from umi.common.pose_util import pose_to_mat, mat_to_pose
 
 class PiperInterface:
     """
@@ -30,6 +31,29 @@ class PiperInterface:
         import time
         while not self.piper.EnablePiper():
             time.sleep(0.01)
+        
+        # Coordinate frame transformation: Piper J6 → UMI convention
+        # 
+        # CONFIRMED from direct movement tests:
+        #   Piper X-axis → Forward/Backward movement
+        #   Piper Y-axis → Left/Right movement
+        #   Piper Z-axis → Up/Down movement ✓
+        # 
+        # UMI convention: X=right, Y=up, Z=forward
+        # 
+        # Position mapping:
+        #   UMI X (right) = Piper Y (left/right) - sign to be verified
+        #   UMI Y (up) = Piper Z (up/down) ✓ CONFIRMED
+        #   UMI Z (forward) = Piper X (forward/backward) - sign to be verified
+        # 
+        # Initial mapping (signs may need adjustment based on actual movement direction):
+        self.tx_piper_j6_to_umi = np.identity(4)
+        self.tx_piper_j6_to_umi[:3, :3] = np.array([
+            [0, 1, 0],   # UMI X (right) = Piper Y (left/right)
+            [0, 0, 1],   # UMI Y (up) = Piper Z (up/down) ✓
+            [1, 0, 0],   # UMI Z (forward) = Piper X (forward/backward)
+        ])
+        self.tx_umi_to_piper_j6 = np.linalg.inv(self.tx_piper_j6_to_umi)
     
     def get_ee_pose(self):
         """
@@ -37,26 +61,35 @@ class PiperInterface:
         
         Returns:
             np.array([x, y, z, rx, ry, rz]) in meters/radians (rotation vector)
+            Transformed from Piper J6 frame to UMI convention.
         """
         end_pose_msg = self.piper.GetArmEndPoseMsgs()
         ep = end_pose_msg.end_pose
         
-        # Position: 0.001 mm → meters
-        x = ep.X_axis / 1e6
-        y = ep.Y_axis / 1e6
-        z = ep.Z_axis / 1e6
+        # Position: 0.001 mm → meters (Piper J6 frame)
+        x_piper = ep.X_axis / 1e6
+        y_piper = ep.Y_axis / 1e6
+        z_piper = ep.Z_axis / 1e6
         
-        # Rotation: 0.001 degrees → radians → rotation vector
+        # Rotation: 0.001 degrees → radians → rotation vector (Piper J6 frame)
         rx_deg = ep.RX_axis / 1000.0
         ry_deg = ep.RY_axis / 1000.0
         rz_deg = ep.RZ_axis / 1000.0
         
         # Convert Euler angles (XYZ intrinsic order) to rotation vector
         euler_rad = np.array([np.radians(rx_deg), np.radians(ry_deg), np.radians(rz_deg)])
-        rot = st.Rotation.from_euler('XYZ', euler_rad)
-        rot_vec = rot.as_rotvec()
+        rot_piper = st.Rotation.from_euler('XYZ', euler_rad)
         
-        return np.array([x, y, z, rot_vec[0], rot_vec[1], rot_vec[2]])
+        # Convert to pose format and transform from Piper J6 to UMI convention
+        pose_piper = np.array([x_piper, y_piper, z_piper, 
+                               rot_piper.as_rotvec()[0], 
+                               rot_piper.as_rotvec()[1], 
+                               rot_piper.as_rotvec()[2]])
+        pose_mat_piper = pose_to_mat(pose_piper)
+        pose_mat_umi = self.tx_piper_j6_to_umi @ pose_mat_piper
+        pose_umi = mat_to_pose(pose_mat_umi)
+        
+        return pose_umi
     
     def get_joint_positions(self):
         """
@@ -109,14 +142,20 @@ class PiperInterface:
         
         Args:
             pose: np.array([x, y, z, rx, ry, rz]) in meters/radians (rotation vector)
+                  In UMI convention, will be transformed to Piper J6 frame.
         """
-        # Position: meters → 0.001 mm
-        X = int(round(pose[0] * 1e6))
-        Y = int(round(pose[1] * 1e6))
-        Z = int(round(pose[2] * 1e6))
+        # Transform from UMI convention to Piper J6 frame
+        pose_mat_umi = pose_to_mat(pose)
+        pose_mat_piper = self.tx_umi_to_piper_j6 @ pose_mat_umi
+        pose_piper = mat_to_pose(pose_mat_piper)
         
-        # Rotation: rotation vector → Euler angles (XYZ) → 0.001 degrees
-        rot_vec = pose[3:]
+        # Position: meters → 0.001 mm (Piper J6 frame)
+        X = int(round(pose_piper[0] * 1e6))
+        Y = int(round(pose_piper[1] * 1e6))
+        Z = int(round(pose_piper[2] * 1e6))
+        
+        # Rotation: rotation vector → Euler angles (XYZ) → 0.001 degrees (Piper J6 frame)
+        rot_vec = pose_piper[3:]
         rot = st.Rotation.from_rotvec(rot_vec)
         euler_rad = rot.as_euler('XYZ')
         euler_deg = np.degrees(euler_rad)
@@ -131,7 +170,7 @@ class PiperInterface:
         # MOVEP is sent every iteration to ensure mode is maintained
         self.piper.MotionCtrl_2(0x01, 0x00, 100, 0x00)
         
-        # Send pose command
+        # Send pose command (in Piper J6 frame)
         self.piper.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
     
     def get_gripper_position(self):
